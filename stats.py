@@ -11,6 +11,7 @@ import re
 import math
 import datetime as dt
 from datetime import timedelta
+import matplotlib.pyplot as plt
 
 def add_time(t1, t2):
     return t1+t2
@@ -184,13 +185,13 @@ class Stats:
         td = timedelta(days=day, hours=h, minutes=m, seconds=s)
         return td
 
-    def num_jobs_avg(self, fromt, tot, type = 'h'):
+    def get_num_jobs(self, fromt, tot, type ='h'):
         if type == 'h':
             tstart = ignore_minutes(fromt)
             tend   = ignore_minutes(tot)
             trange = int((tend - tstart).total_seconds() / 3600)
-            ttable = [tstart+x*ONE_HOUR for x in range(trange)]
-            num_jobs_list = [0 for n in range(trange)]
+            self.ttable = [tstart+x*ONE_HOUR for x in range(trange)]
+            self.num_jobs_list = [0 for n in range(trange)]
             for line in self.decoded_line_list:
                 if ('COMPLETED' in line) and ('STARTED' in line):
                     if line['STARTED'] > tstart:
@@ -199,14 +200,70 @@ class Stats:
                         offset_start = int((job_start - tstart).total_seconds() / 3600)
                         offset_end   = int((job_comp  - tstart).total_seconds() / 3600)
                         for i in range(offset_start, min(offset_end, trange)):
-                            num_jobs_list[i] += 1
-            print ttable
-            print num_jobs_list
-            print np.average(num_jobs_list)
-            return np.average(num_jobs_list)
+                            self.num_jobs_list[i] += 1
+            return np.average(self.num_jobs_list)
+        return
+
+    def plt_num_jobs(self, type ='h'):
+        try:
+            self.ttable
+        except NameError:
+            print 'No time table. Run get_num_jobs First'
+        else:
+            if type == 'h':
+                #plt.plot(self.ttable, self.num_jobs_list, 'lightskyblue')
+                plt.title('Number of Running Jobs Per Hour\n '
+                          + str(self.ttable[0]) + ' -> ' + str(self.ttable[-1]))
+                plt.fill_between(self.ttable, self.num_jobs_list, color='g', alpha = 0.3)
+                plt.show()
+        return
+
+    def plt_jobs_rank(self, fromt, tot):
+        job_dic = {}
+        for line in self.decoded_line_list:
+            if ('COMPLETED' in line) and ('STARTED' in line):
+                if line['STARTED'] > fromt and line['STARTED'] < tot:
+                    job_dic[line['OWNER']] = job_dic.get(line['OWNER'], 0) + 1
+        lists = sorted(job_dic.items(), key=lambda x: x[1], reverse=True)
+        xname, y = zip(*lists)
+        plt.bar(np.arange(len(xname)),y, width = 0.5, align='center', color = 'lightskyblue', edgecolor = 'white')
+        plt.xticks(np.arange(len(xname)), xname,rotation=-30)
+        plt.ylabel('Number of Jobs')
+        plt.xlabel('Username')
+        plt.title('Rank: Total Number of Jobs\n' + str(fromt) + ' -> ' + str(tot))
+        plt.show()
+        return
+
+    def plt_runtime_rank(self, fromt, tot):
+        runtime_dic = {}
+        for line in self.decoded_line_list:
+            if ('COMPLETED' in line) and ('STARTED' in line):
+                if line['STARTED'] > fromt and line['STARTED'] < tot:
+                    runtime_dic[line['OWNER']] = runtime_dic.get(line['OWNER'], timedelta()) \
+                                                 + (min(line['COMPLETED'], tot) - line['STARTED'])
+        lists = sorted(runtime_dic.items(), key=lambda x: x[1], reverse=True)
+        xname, ydelta = zip(*lists)
+        yse = map(to_hours, ydelta)
+        plt.bar(np.arange(len(xname)),yse, width = 0.5, align='center', facecolor = 'lightskyblue', edgecolor = 'white')
+        plt.xticks(np.arange(len(xname)), xname,rotation=-30)
+        plt.ylabel('Hours')
+        plt.xlabel('Username')
+        plt.title('Rank: Total Runtime\n' + str(fromt) + ' -> ' + str(tot))
+        plt.show()
+        return
+
 
 def ignore_minutes(time):
     return dt.datetime(year=time.year, month= time.month, day=time.day, hour=time.hour)
+
+def to_seconds(datedelta):
+    return datedelta.total_seconds()
+
+def to_minutes(datedelta):
+    return datedelta.total_seconds()/60.0
+
+def to_hours(datedelta):
+    return datedelta.total_seconds()/3600.0
 
 ONE_HOUR = timedelta(hours=1)
 
@@ -220,9 +277,8 @@ if __name__ == "__main__":
     astats.decode_all(0)
     astats.find_minmax_SUBMITTED()
     astats.find_minmax_COMPLETED()
-    print ignore_minutes(astats.min_SUBMITTED)
-    print ONE_HOUR
-    nja = astats.num_jobs_avg(astats.min_COMPLETED, astats.max_SUBMITTED)
+    print 'One Hour:', ONE_HOUR
+    nja = astats.get_num_jobs(astats.min_COMPLETED, astats.max_SUBMITTED)
 
     outf = open(OUT_FILE, 'w')
     outf.write('Average Running Time: ' + str(astats.avg_runtime()[0]) +
@@ -233,6 +289,10 @@ if __name__ == "__main__":
                ' From ' + str(astats.min_SUBMITTED) + ' To ' + str(astats.max_COMPLETED) + '\n')
     outf.write('Average Number of Jobs Per Hour: ' + str(int(nja)) + '.' +
                ' From ' + str(astats.min_COMPLETED) + ' To ' + str(astats.max_SUBMITTED) + '\n')
+    outf.close()
+
+    astats.plt_num_jobs()
     print astats.avg_runtime()[0]
     print astats.avg_waittime()[0]
-    outf.close()
+    astats.plt_jobs_rank(astats.min_COMPLETED, astats.max_SUBMITTED)
+    astats.plt_runtime_rank(astats.min_COMPLETED, astats.max_SUBMITTED)
